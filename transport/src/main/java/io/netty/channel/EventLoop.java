@@ -24,6 +24,18 @@ import io.netty.util.concurrent.OrderedEventExecutor;
  * implementation details and internals.
  *
  */
+/**
+ * <p>
+ * EventLoop接口继承了ExecutorService接口，表明这也是个线程池。
+ * <p/>
+ * <p>
+ * 当一个Channel注册完成之后，EventLoop就会处理这个channel的所有I/O操作。
+ * 通常来说，一个EventLoop会处理多个Channel，但也取决于实现的细节和内部。(上面注释的翻译)
+ * <p/>
+ * EventLoop接口继承了 {@link EventLoopGroup}和 {@link OrderedEventExecutor}两个接口，
+ * {@link OrderedEventExecutor}接口表明这个类会有序地执行被提交的任务。
+ * TODO {@link EventLoopGroup}的特性
+ */
 public interface EventLoop extends OrderedEventExecutor, EventLoopGroup {
     @Override
     EventLoopGroup parent();

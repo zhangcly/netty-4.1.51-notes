@@ -275,18 +275,25 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         }
     }
 
+    /**
+     *  循环从 {@link #scheduledTaskQueue}中获取当前时间之前要被执行的scheduleTask并放入 {@link #taskQueue}
+     * @return true 当scheduledTaskQueue中没有当前时间之前要被执行的scheduleTask了
+     * @return false 当taskQueue中没有空间了
+     */
     private boolean fetchFromScheduledTaskQueue() {
         if (scheduledTaskQueue == null || scheduledTaskQueue.isEmpty()) {
             return true;
         }
         long nanoTime = AbstractScheduledEventExecutor.nanoTime();
         for (;;) {
+            //获取当前时间之前要被执行的scheduledTask
             Runnable scheduledTask = pollScheduledTask(nanoTime);
             if (scheduledTask == null) {
                 return true;
             }
             if (!taskQueue.offer(scheduledTask)) {
                 // No space left in the task queue add it back to the scheduledTaskQueue so we pick it up again.
+                //如果taskQueue中没有空间可以继续放scheduledTask，会将scheduledTask重新放回scheduledTaskQueue
                 scheduledTaskQueue.add((ScheduledFutureTask<?>) scheduledTask);
                 return false;
             }

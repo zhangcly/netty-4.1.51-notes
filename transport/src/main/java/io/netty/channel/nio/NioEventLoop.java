@@ -54,6 +54,16 @@ import java.util.concurrent.atomic.AtomicLong;
  * {@link Selector} and so does the multi-plexing of these in the event loop.
  *
  */
+/**
+ * <p>
+ * {@link NioEventLoop}是 {@link SingleThreadEventLoop} 的子类，实现了 {@link EventLoop}。
+ *  {@link NioEventLoop}将channel注册到多路复用器（selector）上并处理事件循环。(注释翻译)
+ *  <p/>
+ * <p>
+ *  NioEventLoop中定义了一个常量 {@link #SELECTOR_AUTO_REBUILD_THRESHOLD}使用来解决Linux下epoll bug的，
+ *  这个值在静态代码块中赋值，可以通过系统参数io.netty.selectorAutoRebuildThreshold来进行设置，默认为512：
+ *  <p/>
+ */
 public final class NioEventLoop extends SingleThreadEventLoop {
 
     private static final InternalLogger logger = InternalLoggerFactory.getInstance(NioEventLoop.class);
@@ -64,6 +74,9 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             SystemPropertyUtil.getBoolean("io.netty.noKeySetOptimization", false);
 
     private static final int MIN_PREMATURE_SELECTOR_RETURNS = 3;
+    /**
+     * 多路复用器自动重新构建的阈值 当事件循环中select次数达到这个值时且一直没有获取到事件时，会进行rebuildSelector
+     */
     private static final int SELECTOR_AUTO_REBUILD_THRESHOLD;
 
     private final IntSupplier selectNowSupplier = new IntSupplier() {
@@ -95,6 +108,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             }
         }
 
+        // 设置SELECTOR_AUTO_REBUILD_THRESHOLD的初始值
         int selectorAutoRebuildThreshold = SystemPropertyUtil.getInt("io.netty.selectorAutoRebuildThreshold", 512);
         if (selectorAutoRebuildThreshold < MIN_PREMATURE_SELECTOR_RETURNS) {
             selectorAutoRebuildThreshold = 0;
@@ -111,27 +125,72 @@ public final class NioEventLoop extends SingleThreadEventLoop {
     /**
      * The NIO {@link Selector}.
      */
+    /**
+     * 被包装后的多路复用器
+     */
     private Selector selector;
+    /**
+     * 未被包装的多路复用器
+     */
     private Selector unwrappedSelector;
+    /**
+     * selector收集到的事件的集合，内部包含了一个SelectionKey数组
+     */
     private SelectedSelectionKeySet selectedKeys;
 
+    /**
+     * 用来获取Selector的多路复用器提供者 关于 {@link #selector}和 {@link #provider}
+     * 可以参考 https://www.yuque.com/docs/share/30731116-06c0-4380-975b-3f143a180640?#
+     */
     private final SelectorProvider provider;
 
     private static final long AWAKE = -1L;
+
     private static final long NONE = Long.MAX_VALUE;
 
     // nextWakeupNanos is:
     //    AWAKE            when EL is awake
     //    NONE             when EL is waiting with no wakeup scheduled
     //    other value T    when EL is waiting with wakeup scheduled at time T
+    /**
+     * {@link #AWAKE}表示这个EventLoop是活跃的
+     * {@link #NONE}表时当前EventLoop在等待并且没有计划中的唤醒任务
+     * 其他值T表时当前EventLoop正在等待并且会在时间T的时候被计划唤醒(这个T是一个纳秒)
+     */
     private final AtomicLong nextWakeupNanos = new AtomicLong(AWAKE);
 
+    /**
+     * select策略的计算器，其中的 {@link SelectStrategy#calculateStrategy}方法用来计算当前的策略，默认的实现类 {@link io.netty.channel.DefaultSelectStrategy}
+     * 的 {@link io.netty.channel.DefaultSelectStrategy#calculateStrategy}方法中是先判断任务队列中是否有任务，如果没有任务就返回 {@link SelectStrategy#SELECT}，
+     * 表示需要进行阻塞地去执行selector的select方法，否则就直接执行selector的selectNow方法，获取当前有多少个事件作为结果，
+     * 如果calculateStrategy方法的返回值大于零，那么就是当前有多少个事件，如果小于零，-1表示重新进行一次操作，-2表示需要进行一次阻塞的select操作，
+     * -3表示需要进行一次非阻塞的select操作，NIO模型下-3是不支持的
+     */
     private final SelectStrategy selectStrategy;
 
+    /**
+     *  ioRatio是事件循环中需要花费在I/O上的时间的比率，值在0-100之间，值越大说明任务的I/O越密集，值越小说明计算越密集
+     */
     private volatile int ioRatio = 50;
+    /**
+     * 被移除的SelectionKey的数量
+     */
     private int cancelledKeys;
+    /**
+     * 是否需要再次select
+     */
     private boolean needsToSelectAgain;
 
+    /**
+     * 唯一的构造方法 给provider,selectStrategy,selector,unwrappedSelector进行赋值
+     * selectorTuple对象通过openSelecter方法创建，openSelcetor方法会调用SelectorProvider的openSelector方法创建一个Selector，
+     * @param parent
+     * @param executor
+     * @param selectorProvider
+     * @param strategy
+     * @param rejectedExecutionHandler
+     * @param queueFactory
+     */
     NioEventLoop(NioEventLoopGroup parent, Executor executor, SelectorProvider selectorProvider,
                  SelectStrategy strategy, RejectedExecutionHandler rejectedExecutionHandler,
                  EventLoopTaskQueueFactory queueFactory) {
@@ -139,6 +198,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 rejectedExecutionHandler);
         this.provider = ObjectUtil.checkNotNull(selectorProvider, "selectorProvider");
         this.selectStrategy = ObjectUtil.checkNotNull(strategy, "selectStrategy");
+        //创建一个SelectorTuple对象，可以提供未经包装的Selector和包装过后的Selector对象
         final SelectorTuple selectorTuple = openSelector();
         this.selector = selectorTuple.selector;
         this.unwrappedSelector = selectorTuple.unwrappedSelector;
@@ -167,7 +227,11 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
     }
 
+    /**
+     *  返回一个 {@link SelectorTuple}对象，这个对象中包含了新创建的未经包装的Selector和包装过后的Selector
+     */
     private SelectorTuple openSelector() {
+        //使用provider的openSelector方法创建一个多路复用器，这个就是未经包装的多路复用器
         final Selector unwrappedSelector;
         try {
             unwrappedSelector = provider.openSelector();
@@ -176,6 +240,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
 
         if (DISABLE_KEY_SET_OPTIMIZATION) {
+            //单个参数的构造函数，未经包装的和包装的Selector是同一个
             return new SelectorTuple(unwrappedSelector);
         }
 
@@ -204,6 +269,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
 
         final Class<?> selectorImplClass = (Class<?>) maybeSelectorImplClass;
+        //新建一个SelectedSelectionKeySet对象
         final SelectedSelectionKeySet selectedKeySet = new SelectedSelectionKeySet();
 
         Object maybeException = AccessController.doPrivileged(new PrivilegedAction<Object>() {
@@ -239,6 +305,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                         return cause;
                     }
 
+                    //通过反射设置selector的selectedKeys和publicSelectedKeys属性为刚创建的SelectedSelectionKeySet对象
                     selectedKeysField.set(unwrappedSelector, selectedKeySet);
                     publicSelectedKeysField.set(unwrappedSelector, selectedKeySet);
                     return null;
@@ -256,8 +323,10 @@ public final class NioEventLoop extends SingleThreadEventLoop {
             logger.trace("failed to instrument a special java.util.Set into: {}", unwrappedSelector, e);
             return new SelectorTuple(unwrappedSelector);
         }
+        //设置NioEventLoop的selectedKeys属性
         selectedKeys = selectedKeySet;
         logger.trace("instrumented a special java.util.Set into: {}", unwrappedSelector);
+        //使用未包装的selector构建一个包装过的selector，再用这两个对象一起构建一个SelectorTuple对象
         return new SelectorTuple(unwrappedSelector,
                                  new SelectedSelectionKeySetSelector(unwrappedSelector, selectedKeySet));
     }
@@ -431,34 +500,48 @@ public final class NioEventLoop extends SingleThreadEventLoop {
         }
     }
 
+    /**
+     * 最主要的方法
+     */
     @Override
     protected void run() {
         int selectCnt = 0;
+        //这是一个死循环 也就是会一直去获取事件
         for (;;) {
             try {
                 int strategy;
                 try {
+                    //执行策略计算器的计算策略的方法，如果hasTask方法为true，就是说队列里面有任务，
+                    // 那么selector会立刻执行一次select方法，得到的int结果即为strategy 否则返回SelectStrategy.SELECT
                     strategy = selectStrategy.calculateStrategy(selectNowSupplier, hasTasks());
                     switch (strategy) {
+                    //CONTINUE和BUSY_WAIT都不会被走到
                     case SelectStrategy.CONTINUE:
                         continue;
 
                     case SelectStrategy.BUSY_WAIT:
                         // fall-through to SELECT since the busy-wait is not supported with NIO
 
-                    case SelectStrategy.SELECT:
+                    case SelectStrategy.SELECT:  //走到SELECT的话，说明上面执行的hasTasks为false
+                        //计算这一次执行任务的时间在多少纳秒后
                         long curDeadlineNanos = nextScheduledTaskDeadlineNanos();
                         if (curDeadlineNanos == -1L) {
                             curDeadlineNanos = NONE; // nothing on the calendar
                         }
+                        //设置当前NioEventLoop下一次select操作在curDeadlineNanos纳秒，这个纳秒数是基于io.netty.util.concurrent.ScheduledFutureTask类
+                        // 第一次被调用时其中的静态变量START_TIME被赋的值（当时的时间System.nanosTime()）
                         nextWakeupNanos.set(curDeadlineNanos);
                         try {
                             if (!hasTasks()) {
+                                //如果curDeadlineNanos是NONE或者当前时间距离curDeadlineNanos不到5微秒，selector会立刻执行select操作，
+                                // 否则会阻塞到deadline（curDeadlineNanos - 5微秒，然后在按毫秒取整，也就是如果是6微秒，那么会阻塞到1毫秒之后）这个时间点再去select，
+                                // select操作得到的结果就是strategy
                                 strategy = select(curDeadlineNanos);
                             }
                         } finally {
                             // This update is just to help block unnecessary selector wakeups
                             // so use of lazySet is ok (no race condition)
+                            //这个时候select操作已经执行了，将当前NioEventLoop设置为活跃的（从select操作的阻塞中wakeup）
                             nextWakeupNanos.lazySet(AWAKE);
                         }
                         // fall through
@@ -472,15 +555,22 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                     handleLoopException(e);
                     continue;
                 }
+                //上面的try代码块中strategy的结果就是执行一次select操作的结果，也就是事件的数量
+                // 不论怎样Selector都会执行一次select操作，要么hasTasks()方法为true立刻执行一次selectNow(),
+                // 要么hasTasks()方法为false在case SelectStrategy.SELECT中执行一次select
 
+                // selectCnt加一 如果连续512次加一之后没有被重置为0 ，那么netty会认为进入空转了
                 selectCnt++;
                 cancelledKeys = 0;
                 needsToSelectAgain = false;
                 final int ioRatio = this.ioRatio;
                 boolean ranTasks;
                 if (ioRatio == 100) {
+                    //如果IO比例为100就先执行processSelectedKeys，最后执行runAllTasks。
                     try {
                         if (strategy > 0) {
+                            // processSelectedKeys方法会获取selectedKeys中的每个SelectionKey对象的attachment属性，这个属性如果是一个channel，
+                            // 就从channel中执行对应事件的逻辑（read，write，connect等），如果selecttedKeys为空会直接return。
                             processSelectedKeys();
                         }
                     } finally {
@@ -488,12 +578,17 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                         ranTasks = runAllTasks();
                     }
                 } else if (strategy > 0) {
+                    //如果IO比例小于100 且 strategy>0
                     final long ioStartTime = System.nanoTime();
                     try {
                         processSelectedKeys();
                     } finally {
                         // Ensure we always run tasks.
+                        //根据io比例和io所用的时间计算出任务所需的时间
                         final long ioTime = System.nanoTime() - ioStartTime;
+                        // 从scheduledTaskQueue中依次取出task放入taskQueue中，如果放入失败，就将这个task再次放入scheduledTaskQueue中并结束循环。
+                        // 然后依次从taskQueue中取出task，每执行64（因为执行nanosTime()方法相对昂贵）个task后会判断是否已经超出执行任务的时间，
+                        // 如果超出了会结束循环，最后依次将tailTasks中的task执行完
                         ranTasks = runAllTasks(ioTime * (100 - ioRatio) / ioRatio);
                     }
                 } else {
@@ -501,12 +596,19 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                 }
 
                 if (ranTasks || strategy > 0) {
+                    // 如果一次select操作后有任务被执行或者selcet的结果大于0，那么selectCnt会被重置
                     if (selectCnt > MIN_PREMATURE_SELECTOR_RETURNS && logger.isDebugEnabled()) {
                         logger.debug("Selector.select() returned prematurely {} times in a row for Selector {}.",
                                 selectCnt - 1, selector);
                     }
                     selectCnt = 0;
                 } else if (unexpectedSelectorWakeup(selectCnt)) { // Unexpected wakeup (unusual case)
+                    // unexpectedSelectorWakeup会根据select的次数是否大于SELECTOR_AUTO_REBUILD_THRESHOLD，
+                    // 如果大于SELECTOR_AUTO_REBUILD_THRESHOLD则会进行rebuildSelector,rebuildSelector 方法会重新构造一个Seletor并将现有的channel迁移到新的Selector上
+                    // 这是为了处理linux下的epoll bug，nio中是通过selector轮询io事件，selector的select方法会一直阻塞或者超时，
+                    // linux有时候会出现问题，有时候即使没有io事件到达或超时selector也会返回，会导致线程进入死循环从而cup load 100%，
+                    // netty定义了一个selector空轮询的次数阈值SELECTOR_AUTO_REBUILD_THRESHOLD默认为512，当selectCnt超过这个值会rebuildSelector
+                    // rebuildSelector之后也将selectCnt置为0
                     selectCnt = 0;
                 }
             } catch (CancelledKeyException e) {
