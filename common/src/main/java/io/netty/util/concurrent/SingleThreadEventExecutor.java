@@ -47,6 +47,21 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
  * Abstract base class for {@link OrderedEventExecutor}'s that execute all its submitted tasks in a single thread.
  *
  */
+
+/**
+ * 单线程的事件执行器，SingleThreadEventLoop的父类，继承自 {@link AbstractScheduledEventExecutor}，实现了 {@link OrderedEventExecutor}接口
+ * <p>
+ * 执行任务的方法是 {@link #execute(Runnable)}方法和{@link #lazyExecute(Runnable)} 方法，
+ * 这两个方法最终都调用了私有的重载的 {@link #execute(Runnable, boolean)}方法
+ * 核心方法也就是{@link #execute(Runnable, boolean)}这个方法
+ * </p>
+ * <p>
+ * SingleThreadEventExecutor没有实现EventLoop接口，所以SingleThreadEventLoop相比SingleThreadEventExecutor而言其特点就是实现了EventLoop接口，
+ * 也就是说SingleThreadEventLoop处理事件是循环去处理的，不过EventLoop接口并没有定义循环处理的方法，而只是语义上规定进行循环处理事件。
+ * 因为SingleThreadEventLoop是循环的，所以SingleThreadEventLoop也就可以定于在循环的结尾执行tailTasks中的任务，
+ * 所以tailTasks相关的属性和方法就是SingleThreadEventLoop在 {@link SingleThreadEventExecutor}的基础上进行扩充的。
+ * </p>
+ */
 public abstract class SingleThreadEventExecutor extends AbstractScheduledEventExecutor implements OrderedEventExecutor {
 
     static final int DEFAULT_MAX_PENDING_EXECUTOR_TASKS = Math.max(16,
@@ -74,22 +89,49 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
             AtomicReferenceFieldUpdater.newUpdater(
                     SingleThreadEventExecutor.class, ThreadProperties.class, "threadProperties");
 
+    /**
+     * 任务队列
+     */
     private final Queue<Runnable> taskQueue;
 
+    /**
+     * 执行任务的线程，使用 {@link #executor}来启动，并将 {@link #thread}设置为 {@link #executor}中执行的线程
+     */
     private volatile Thread thread;
     @SuppressWarnings("unused")
+    /**
+     * 线程的一些属性
+     */
     private volatile ThreadProperties threadProperties;
+    /**
+     * 执行器，用来启动
+     */
     private final Executor executor;
+    /**
+     *  {@link #thread} 是否被interrupte了
+     */
     private volatile boolean interrupted;
 
     private final CountDownLatch threadLock = new CountDownLatch(1);
     private final Set<Runnable> shutdownHooks = new LinkedHashSet<Runnable>();
     private final boolean addTaskWakesUp;
+    /**
+     * 最大的任务数量
+     */
     private final int maxPendingTasks;
+    /**
+     * 达到最大任务数量之后的拒绝策略
+     */
     private final RejectedExecutionHandler rejectedExecutionHandler;
 
+    /**
+     * 上一次执行的时间
+     */
     private long lastExecutionTime;
 
+    /**
+     * 这个 {@link SingleThreadEventExecutor}执行器的状态，刚初始化的时候是未启动
+     */
     @SuppressWarnings({ "FieldMayBeFinal", "unused" })
     private volatile int state = ST_NOT_STARTED;
 
@@ -831,9 +873,15 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
     }
 
     private void execute(Runnable task, boolean immediate) {
+        //判断当前线程是否是执行任务的线程（成员变量thread）
         boolean inEventLoop = inEventLoop();
+        //将task加入任务队列taskQueue中 如果当前线程就是执行任务的线程，那么到这基本就完了
         addTask(task);
         if (!inEventLoop) {
+            // 如果当前线程不是执行任务的线程，就执行startThread方法，startThread方法是做一些初始化的操作
+            // 做这个判断是因为在执行任务的线程（成员变量thread的run方法中）中也会使用execute提交任务
+
+            //启动一个线程执行当前这个SingleThreadEventExecutor对象的run方法
             startThread();
             if (isShutdown()) {
                 boolean reject = false;
@@ -946,15 +994,22 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     private static final long SCHEDULE_PURGE_INTERVAL = TimeUnit.SECONDS.toNanos(1);
 
+    /**
+     * 如果 {@link #thread}未启动就执行 {@link #doStartThread()}方法 并更改线程的状态为已启动
+     */
     private void startThread() {
         if (state == ST_NOT_STARTED) {
+            //如果线程状态没有启动就会将状态设为已经启动，并执行doStartThread方法
+            //如果线程已经启动了，就什么都不会做，上面的execute(Runnable task, boolean immediate)方法也仅仅只是将task放入任务队列中去
             if (STATE_UPDATER.compareAndSet(this, ST_NOT_STARTED, ST_STARTED)) {
                 boolean success = false;
                 try {
+                    //执行一个Runnable，在这个Runnable中会调用当前这个SingleThreadEventExecutor对象的run方法
                     doStartThread();
                     success = true;
                 } finally {
                     if (!success) {
+                        //没有成功的话就将状态还是设为未启动
                         STATE_UPDATER.compareAndSet(this, ST_STARTED, ST_NOT_STARTED);
                     }
                 }
@@ -980,8 +1035,14 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         return false;
     }
 
+    /**
+     * 使用 {@link #executor}执行一个 {@link Runnable}对象，并将执行这个{@link Runnable}的线程赋值给 {@link #thread}
+     * 在这个{@link Runnable}对象的run方法中会调用 {@link SingleThreadEventExecutor}的 {@link #run()}方法，最终会调用子类的run方法,
+     * 在NioEventLoop中就是一直死循环select获取事件，并执行任务
+     */
     private void doStartThread() {
         assert thread == null;
+        // 通过executor这个线程池来执行一个Runnable对象，这个线程池中执行这个Runnable的线程就是工作线程
         executor.execute(new Runnable() {
             @Override
             public void run() {

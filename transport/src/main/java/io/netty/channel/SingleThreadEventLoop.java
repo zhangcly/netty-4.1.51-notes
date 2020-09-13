@@ -30,11 +30,29 @@ import java.util.concurrent.ThreadFactory;
  * Abstract base class for {@link EventLoop}s that execute all its submitted tasks in a single thread.
  *
  */
+/**
+ * 继承了 {@link SingleThreadEventExecutor} 类，同时是 {@link io.netty.channel.nio.NioEventLoop} 的父类，它也实现了实现了 {@link EventLoop} 接口。
+ * 顾名思义， {@link SingleThreadEventLoop} 使用单线程处理被提交的任务。
+ */
 public abstract class SingleThreadEventLoop extends SingleThreadEventExecutor implements EventLoop {
 
     protected static final int DEFAULT_MAX_PENDING_TASKS = Math.max(16,
             SystemPropertyUtil.getInt("io.netty.eventLoop.maxPendingTasks", Integer.MAX_VALUE));
 
+    /**
+     * {@link #tailTasks} 中的task会在当前或者下一次时间循环中最后被执行
+     * 在 {@link io.netty.channel.nio.NioEventLoop#run}方法中会执行
+     * {@link #hasTasks}方法 就是判断 {@link #taskQueue}和 {@link #tailTasks}中有没有task。
+     * 和 {@link #runAllTasks}方法 会在每次循环结束后调用 {@link #afterRunningAllTasks()}执行{@link #tailTasks}中的task
+     * <p>
+     * {@link #executeAfterEventLoopIteration(Runnable)}方法是用来添加一个task在当前或者下一次事件循环的最后后执行的，
+     * 因为这个方法的权限修饰符是public，所以在使用netty的时候就可以调用这个方法来添加当前或者下一次事件循环之后执行的任务。
+     * 而一般情况下tailTasks是不会被使用到的。
+     * </p>
+     * <p>
+     * 也提供了删除task的方法 {@link #removeAfterEventLoopIterationTask(Runnable)}
+     * </p>
+     */
     private final Queue<Runnable> tailTasks;
 
     protected SingleThreadEventLoop(EventLoopGroup parent, ThreadFactory threadFactory, boolean addTaskWakesUp) {
