@@ -29,6 +29,13 @@ import java.util.concurrent.TimeUnit;
 /**
  * Abstract base class for {@link EventExecutor}s that want to support scheduling.
  */
+/**
+ * {@link SingleThreadEventExecutor}的父类，是一个支持定时任务的执行器
+ * {@link AbstractScheduledEventExecutor}中维护了一个优先队列 {@link #scheduledTaskQueue}用来存放定时任务，
+ * 以及一个long类型的 {@link #nextTaskId}表示下一个定时任务的id
+ *
+ * 核心方法是 {@link #schedule(ScheduledFutureTask)}方法 将一个 {@link ScheduledFutureTask}对象作为参数执行 {@link #execute(Runnable)}方法
+ */
 public abstract class AbstractScheduledEventExecutor extends AbstractEventExecutor {
     private static final Comparator<ScheduledFutureTask<?>> SCHEDULED_FUTURE_TASK_COMPARATOR =
             new Comparator<ScheduledFutureTask<?>>() {
@@ -43,8 +50,14 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
        public void run() { } // Do nothing
     };
 
+    /**
+     * 定时任务优先队列
+     */
     PriorityQueue<ScheduledFutureTask<?>> scheduledTaskQueue;
 
+    /**
+     * 下一个任务的id
+     */
     long nextTaskId;
 
     protected AbstractScheduledEventExecutor() {
@@ -154,8 +167,14 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
      * Return the deadline (in nanoseconds) when the next scheduled task is ready to be run or {@code -1}
      * if no task is scheduled.
      */
+    /**
+     * 获取下一次任务的超时时间 在 {@link NioEventLoop}中调用此方法获取下一次select操作的时间
+     * @return
+     */
     protected final long nextScheduledTaskDeadlineNanos() {
+        //获取下一次定时任务
         ScheduledFutureTask<?> scheduledTask = peekScheduledTask();
+        //返回下一次定时任务的deadlineNanos
         return scheduledTask != null ? scheduledTask.deadlineNanos() : -1;
     }
 
@@ -258,15 +277,27 @@ public abstract class AbstractScheduledEventExecutor extends AbstractEventExecut
         scheduledTaskQueue().add(task.setId(++nextTaskId));
     }
 
+    /**
+     * {@link AbstractScheduledEventExecutor}类中的核心方法，添加一个定时执行task
+     * 这个定时的task可能是 按照固定频率循环多次执行、按照固定延时循环多次执行或者固定延时之后执行一次
+     * 可以参考 {@link ScheduledFutureTask}中的注释
+     * @param task 要执行的任务
+     * @param <V> 执行任务的返回值类型
+     * @return
+     */
     private <V> ScheduledFuture<V> schedule(final ScheduledFutureTask<V> task) {
         if (inEventLoop()) {
+            //如果添加这个task的线程和执行task的线程是同一个线程，那么久直接将这个task添加到 {@link #scheduledTaskQueue}这个优先队列中
             scheduleFromEventLoop(task);
         } else {
             final long deadlineNanos = task.deadlineNanos();
             // task will add itself to scheduled task queue when run if not expired
-            if (beforeScheduledTaskSubmitted(deadlineNanos)) {
+            if (beforeScheduledTaskSubmitted(deadlineNanos)) { //是否需要立刻唤醒executor执行这个task
+                // {@link Executor} 的方法，就是执行一个任务，依赖于子类的实现，
+                // 在 {@link SingleThreadEventExecutor}类中就是在第一次执行的时候启动线程 以后就不用了启动线程了
                 execute(task);
             } else {
+                //延迟执行
                 lazyExecute(task);
                 // Second hook after scheduling to facilitate race-avoidance
                 if (afterScheduledTaskSubmitted(deadlineNanos)) {

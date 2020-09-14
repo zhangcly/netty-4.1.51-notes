@@ -861,6 +861,11 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         return isTerminated();
     }
 
+    /**
+     * {@link Executor}接口的方法，用来执行一个任务  具体的实现在 {@link SingleThreadEventExecutor}类中的实现会调用
+     * 重载的{@link #execute(Runnable, boolean)}方法，分为了是否立刻执行两种情况
+     * @param task 要被执行的任务
+     */
     @Override
     public void execute(Runnable task) {
         ObjectUtil.checkNotNull(task, "task");
@@ -1054,6 +1059,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                 boolean success = false;
                 updateLastExecutionTime();
                 try {
+                    //调用子类的run方法，在 {@link NioEventLoop}中会循环执行select 判断有没有事件产生
                     SingleThreadEventExecutor.this.run();
                     success = true;
                 } catch (Throwable t) {

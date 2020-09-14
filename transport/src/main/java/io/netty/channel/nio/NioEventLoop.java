@@ -524,7 +524,7 @@ public final class NioEventLoop extends SingleThreadEventLoop {
                         // fall-through to SELECT since the busy-wait is not supported with NIO
 
                     case SelectStrategy.SELECT:  //走到SELECT的话，说明上面执行的hasTasks为false
-                        //计算这一次执行任务的时间在多少纳秒后
+                        //计算接下快来这一次执行任务的时间在多少纳秒后
                         long curDeadlineNanos = nextScheduledTaskDeadlineNanos();
                         if (curDeadlineNanos == -1L) {
                             curDeadlineNanos = NONE; // nothing on the calendar
