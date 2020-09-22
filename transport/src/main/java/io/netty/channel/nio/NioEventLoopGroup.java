@@ -34,6 +34,13 @@ import java.util.concurrent.ThreadFactory;
 /**
  * {@link MultithreadEventLoopGroup} implementations which is used for NIO {@link Selector} based {@link Channel}s.
  */
+/**
+ * MultithreadEventLoopGroup类的子类，它用于基于NIO多路复用器（Selector）的channel。
+ * 同时它的继承关系中父类还有ScheduledExecutorService类，也就是说，它也是一个用来执行定时任务的线程池。
+ * 其构造函数有多个重载，最终都会调用父类的构造方法
+ *
+ * {@link #newChild(Executor, Object...)}方法相对比较重要
+ */
 public class NioEventLoopGroup extends MultithreadEventLoopGroup {
 
     /**
@@ -139,6 +146,13 @@ public class NioEventLoopGroup extends MultithreadEventLoopGroup {
         }
     }
 
+    /**
+     * 创建了一个NioEventLoop对象，这个方法会被循环调用构造参数中的nThreads次，也就是会创建nThreads个NioEventLoop对象
+     * @param executor
+     * @param args
+     * @return
+     * @throws Exception
+     */
     @Override
     protected EventLoop newChild(Executor executor, Object... args) throws Exception {
         EventLoopTaskQueueFactory queueFactory = args.length == 4 ? (EventLoopTaskQueueFactory) args[3] : null;

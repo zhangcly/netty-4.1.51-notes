@@ -34,7 +34,10 @@ import io.netty.util.concurrent.OrderedEventExecutor;
  * <p/>
  * EventLoop接口继承了 {@link EventLoopGroup}和 {@link OrderedEventExecutor}两个接口，
  * {@link OrderedEventExecutor}接口表明这个类会有序地执行被提交的任务。
- * TODO {@link EventLoopGroup}的特性
+ * 
+ * {@link EventLoop}也是 一种{@link EventLoopGroup}，
+ * 在 {@link EventLoopGroup}中注册一个 {@link Channel}的实现就是 调用{@link EventLoopGroup#next()}
+ * 获取下一个 {@link EventLoop}然后注册 {@link Channel}
  */
 public interface EventLoop extends OrderedEventExecutor, EventLoopGroup {
     @Override

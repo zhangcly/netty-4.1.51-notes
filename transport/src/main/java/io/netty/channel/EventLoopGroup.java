@@ -22,9 +22,19 @@ import io.netty.util.concurrent.EventExecutorGroup;
  * processed for later selection during the event loop.
  *
  */
+/**
+ * 特殊的 能够注册 在循环中处理后续的select操作 的 {@link Channel}的 EventExecutorGroup
+ * {@link EventLoopGroup}是一组 {@link EventLoop}，同时也是一组 {@link java.util.concurrent.Executor}
+ * {@link EventLoopGroup}中的核心方法是 {@link #register(Channel)},注册一个 {@link Channel}
+ * 其实现就是调用 {@link #next()}获取下一个 {@link EventLoop}注册到该 {@link EventLoop}上
+ * {@link EventLoop}也是一种特殊的 {@link EventLoopGroup}，只不过 {@link EventLoop}中group只有它自己一个元素
+ */
 public interface EventLoopGroup extends EventExecutorGroup {
     /**
      * Return the next {@link EventLoop} to use
+     */
+    /**
+     * 获取下一个要被使用的 {@link EventLoop}
      */
     @Override
     EventLoop next();
@@ -32,6 +42,11 @@ public interface EventLoopGroup extends EventExecutorGroup {
     /**
      * Register a {@link Channel} with this {@link EventLoop}. The returned {@link ChannelFuture}
      * will get notified once the registration was complete.
+     */
+    /**
+     * 注册 {@link Channel}到当前的 {@link EventLoop}上 返回一个能在这次注册完成时进行通知的{@link ChannelFuture}
+     * @param channel
+     * @return
      */
     ChannelFuture register(Channel channel);
 

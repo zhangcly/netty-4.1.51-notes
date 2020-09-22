@@ -28,9 +28,18 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Abstract base class for {@link EventExecutorGroup} implementations that handles their tasks with multiple threads at
  * the same time.
  */
+/**
+ * 用多线程并发处理tasks的{@link EventExecutorGroup}的抽象实现 {@link io.netty.channel.MultithreadEventLoopGroup} 的父类，
+ */
 public abstract class MultithreadEventExecutorGroup extends AbstractEventExecutorGroup {
 
+    /**
+     * 执行任务的执行器 使用 {@link #newChild(Executor, Object...)}方法创建，数组length为构造方法中的nThreads
+     */
     private final EventExecutor[] children;
+    /**
+     * 只读的children，是 {@link #children}的不可修改视图
+     */
     private final Set<EventExecutor> readonlyChildren;
     private final AtomicInteger terminatedChildren = new AtomicInteger();
     private final Promise<?> terminationFuture = new DefaultPromise(GlobalEventExecutor.INSTANCE);
@@ -66,6 +75,13 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
      * @param chooserFactory    the {@link EventExecutorChooserFactory} to use.
      * @param args              arguments which will passed to each {@link #newChild(Executor, Object...)} call
      */
+    /**
+     * 创建一个实例
+     * @param nThreads 线程数量
+     * @param executor 线程池/用来执行 {@link Runnable}的执行器
+     * @param chooserFactory 
+     * @param args 调用{@link #newChild(Executor, Object...)}的其他参数
+     */
     protected MultithreadEventExecutorGroup(int nThreads, Executor executor,
                                             EventExecutorChooserFactory chooserFactory, Object... args) {
         if (nThreads <= 0) {
@@ -73,14 +89,17 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
         }
 
         if (executor == null) {
+            //如果executor为null，实例化一个 {@link ThreadPerTaskExecutor} 它的execut方法每次都会new一个线程去执行 {@link Runnable}任务
             executor = new ThreadPerTaskExecutor(newDefaultThreadFactory());
         }
 
+        //实例化children数组
         children = new EventExecutor[nThreads];
 
         for (int i = 0; i < nThreads; i ++) {
             boolean success = false;
             try {
+                //实例化每个child 在NioEventLoopGroup的实现中是构建一个NioEventLoop对象
                 children[i] = newChild(executor, args);
                 success = true;
             } catch (Exception e) {
@@ -108,21 +127,32 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
             }
         }
 
+        //根据数组children的length即线程的数量创建chooser
+        // 如果legnth是2的次方会创建一个PowerOfTwoEventExecutorChooser否则创建GenericEventExecutorChooser，
+        // 这两个都是轮询的算法但是PowerOfTwoEventExecutorChooser使用位运算在细节上性能更好
         chooser = chooserFactory.newChooser(children);
 
+        //构建terminationListener
         final FutureListener<Object> terminationListener = new FutureListener<Object>() {
             @Override
+            /**
+             * 操作完成时触发
+             */
             public void operationComplete(Future<Object> future) throws Exception {
+                //terminatedChildren自增
                 if (terminatedChildren.incrementAndGet() == children.length) {
+                    //如果全部都完成了，就标记为成功
                     terminationFuture.setSuccess(null);
                 }
             }
         };
 
+        //给每个child添加listener，在这个EventExecutor执行完之前会调用listener的operationComplete方法
         for (EventExecutor e: children) {
             e.terminationFuture().addListener(terminationListener);
         }
 
+        //使用children构建一个不可变的set视图赋值给readonlyChildren
         Set<EventExecutor> childrenSet = new LinkedHashSet<EventExecutor>(children.length);
         Collections.addAll(childrenSet, children);
         readonlyChildren = Collections.unmodifiableSet(childrenSet);
@@ -132,6 +162,13 @@ public abstract class MultithreadEventExecutorGroup extends AbstractEventExecuto
         return new DefaultThreadFactory(getClass());
     }
 
+    /**
+     * MultithreadEventLoopGroup父类MultithreadEventExecutorGroup中的方法
+     * 因为EventExecutorGroup和EventLoopGroup都定义了next方法但返回值不同，
+     * 父类中实现了EventExecutorGroup的next方法，而这个chooser中维护的executors
+     * 就是构建NioEventLoopGroup时创建NioEventLoop数组children，
+     * 所以这里返回的是一个NioEventLoop对象，NioEventLoop即实现了EventExecutor也实现了EventLoop接口
+     */
     @Override
     public EventExecutor next() {
         return chooser.next();
