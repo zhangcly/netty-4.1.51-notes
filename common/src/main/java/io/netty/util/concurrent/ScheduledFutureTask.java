@@ -174,7 +174,7 @@ final class ScheduledFutureTask<V> extends PromiseTask<V> implements ScheduledFu
      * 这个run方法必须在Executor的执行线程中被执行 {@link #task}
      * 在 {@link AbstractScheduledEventExecutor#schedule(ScheduledFutureTask)}中执行一个 {@link ScheduledFutureTask}
      * 会调用子类的{@link AbstractScheduledEventExecutor#execute(Runnable)} 方法，
-     * {@link SingleThreadEventExecutor#execute(Runnable)} 的实现中会启动线程，然后使用子类的
+     * {@link SingleThreadEventExecutor#execute(Runnable)} 的实现中会启动线程将任务放入队列，然后执行子类的run方法去执行这个任务
      */
     @Override
     public void run() {
@@ -210,7 +210,7 @@ final class ScheduledFutureTask<V> extends PromiseTask<V> implements ScheduledFu
                             deadlineNanos = nanoTime() - periodNanos;
                         }
                         if (!isCancelled()) {
-                            //如果这个定时任务吗，没有被删除 那么僵这个任务再次添加到任务的优先队列中去
+                            //如果这个定时任务没有移除 那么将这个任务再次添加到任务的优先队列中去
                             //这就是固定频率和固定延迟的循环执行的实现
                             scheduledExecutor().scheduledTaskQueue().add(this);
                         }
